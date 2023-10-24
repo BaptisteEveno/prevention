@@ -1,42 +1,54 @@
-# Use the official PHP image with Apache
-FROM php:8.0-apache
-
-# Install git, unzip, and other necessary tools and PHP extensions
-RUN apt-get update && apt-get install -y git unzip libpng-dev mariadb-client && \
-    docker-php-ext-install pdo pdo_mysql gd
-
-# Install Composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# Use a base image with PHP and composer pre-installed
+FROM composer:latest as composer
 
 # Set working directory
-WORKDIR /var/www/html
+WORKDIR /app
 
-# Install Laravel and other PHP dependencies
-RUN composer create-project laravel/laravel . && \
-    composer require barryvdh/laravel-debugbar --dev && \
-    composer require --dev barryvdh/laravel-ide-helper
+# Copy application code to the container
+COPY . /app
 
-# Install Breeze, Vue, TypeScript, Vite and other JavaScript dependencies
-RUN php artisan breeze:install && \
-    npm install vue@latest vue-router@4 typescript vite -g && \
-    npm install
+# Install composer dependencies
+RUN composer install
 
-# Configure Laravel
-COPY .env.example .env
-RUN sed -i 's/DB_CONNECTION=mysql/DB_CONNECTION=mariadb/g' .env && \
-    sed -i 's/DB_HOST=127.0.0.1/DB_HOST=mariadb/g' .env && \
-    sed -i 's/DB_DATABASE=homestead/DB_DATABASE=prevention/g' .env && \
+# Use a base image with PHP and necessary extensions
+FROM php:7.4-fpm
+
+# Install MySQL extension for PHP
+RUN docker-php-ext-install pdo_mysql
+
+# Install NodeJS and npm
+RUN apt-get update && apt-get install -y nodejs npm
+
+# Copy installed dependencies from composer container
+COPY --from=composer /app /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy over the environment file and set database configurations
+RUN echo "DB_CONNECTION=mysql\n\
+DB_HOST=127.0.0.1\n\
+DB_PORT=3306\n\
+DB_DATABASE=prevention\n\
+DB_USERNAME=root\n\
+DB_PASSWORD=" > .env
+
+# The SQL command would be run from a MySQL/MariaDB client, so it's not included here
+
+# Run the migrations, seed the database, and other necessary commands
+RUN php artisan migrate && \
+    php artisan create:all && \
+    php artisan db:seed && \
     php artisan key:generate
 
-# Run migrations
-RUN php artisan migrate
+# Install Vite globally
+RUN npm install -g vite
 
-# Seed the database and create all necessary data
-RUN php artisan create:all && \
-    php artisan db:seed
+# Run the project in development mode
+RUN npm run dev
 
-# Expose necessary ports
-EXPOSE 8000 5173
+# Expose port 8000 for the server
+EXPOSE 8000
 
 # Start the local server
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
