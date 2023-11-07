@@ -1,54 +1,48 @@
-# Use a base image with PHP and composer pre-installed
-FROM composer:latest as composer
+# Use the official PHP image with the Apache server
+FROM php:8.2-apache
+
+# Install system dependencies including unzip, git, and zip extension for PHP
+RUN apt-get update && apt-get install -y \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    libzip-dev \
+    default-mysql-client \
+    unzip \
+    git \
+    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Composer to run as super user
+ENV COMPOSER_ALLOW_SUPERUSER=1
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+RUN git clone https://github.com/docker/docker-nodejs-sample
+# Install Node.js and npm
+# Install Node.js and npm
+
 
 # Set working directory
-WORKDIR /app
+WORKDIR /var/www/html
 
-# Copy application code to the container
-COPY . /app
+# Copy existing application directory contents
+COPY . .
 
-# Install composer dependencies
-RUN composer install
+# Copy the .env file and configure database access
+COPY .env.example .env
+RUN sed -i 's/DB_CONNECTION=mysql/DB_CONNECTION=mysql\nDB_HOST=db\nDB_PORT=3306\nDB_DATABASE=prevention\nDB_USERNAME=root\nDB_PASSWORD=/' .env
 
-# Use a base image with PHP and necessary extensions
-FROM php:7.4-fpm
+# Install PHP dependencies
+RUN composer install --no-interaction --no-plugins --no-scripts
 
-# Install MySQL extension for PHP
-RUN docker-php-ext-install pdo_mysql
+# Generate application key
+RUN php artisan key:generate
 
-# Install NodeJS and npm
-RUN apt-get update && apt-get install -y nodejs npm
-
-# Copy installed dependencies from composer container
-COPY --from=composer /app /app
-
-# Set working directory
-WORKDIR /app
-
-# Copy over the environment file and set database configurations
-RUN echo "DB_CONNECTION=mysql\n\
-DB_HOST=127.0.0.1\n\
-DB_PORT=3306\n\
-DB_DATABASE=prevention\n\
-DB_USERNAME=root\n\
-DB_PASSWORD=" > .env
-
-# The SQL command would be run from a MySQL/MariaDB client, so it's not included here
-
-# Run the migrations, seed the database, and other necessary commands
-RUN php artisan migrate && \
-    php artisan create:all && \
-    php artisan db:seed && \
-    php artisan key:generate
-
-# Install Vite globally
-RUN npm install -g vite
-
-# Run the project in development mode
-RUN npm run dev
-
-# Expose port 8000 for the server
-EXPOSE 8000
-
-# Start the local server
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+# Expose port 8000 and start PHP server
+EXPOSE 8199
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8199"]
